@@ -21,6 +21,7 @@ import com.google.api.gax.grpc.ChannelPoolSettings;
 import com.google.api.gax.grpc.InstantiatingGrpcChannelProvider;
 import com.google.api.gax.rpc.HeaderProvider;
 import com.google.api.gax.rpc.UnaryCallSettings;
+import com.google.api.gax.tracing.OpenTelemetryTracingFactory;
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.ExternalAccountCredentials;
 import com.google.auth.oauth2.ImpersonatedCredentials;
@@ -35,6 +36,8 @@ import com.google.common.base.Objects;
 import com.google.inject.Inject;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.NettyChannelBuilder;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.OpenTelemetry;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
@@ -214,6 +217,15 @@ public class BigQueryClientFactory implements Serializable {
               .setTransportChannelProvider(transportBuilder.build())
               .setCredentialsProvider(FixedCredentialsProvider.create(getCredentials()))
               .setUniverseDomain(universeDomain);
+      if (bqConfig.isOpenTelemetryTracingEnabled()) {
+        OpenTelemetry openTelemetry = GlobalOpenTelemetry.get();
+        // The enhanced Storage Read client has its own tracing layer in addition to GAX.
+        clientSettings
+            .setEnableOpenTelemetryTracing(true)
+            .setOpenTelemetryTracerProvider(openTelemetry.getTracerProvider())
+            .getStubSettingsBuilder()
+            .setTracerFactory(new OpenTelemetryTracingFactory(openTelemetry));
+      }
 
       bqConfig
           .getCreateReadSessionTimeoutInSeconds()
@@ -248,6 +260,11 @@ public class BigQueryClientFactory implements Serializable {
               .setTransportChannelProvider(transportBuilder.build())
               .setCredentialsProvider(FixedCredentialsProvider.create(getCredentials()))
               .setUniverseDomain(universeDomain);
+      if (bqConfig.isOpenTelemetryTracingEnabled()) {
+        clientSettings
+            .getStubSettingsBuilder()
+            .setTracerFactory(new OpenTelemetryTracingFactory(GlobalOpenTelemetry.get()));
+      }
       return BigQueryWriteClient.create(clientSettings.build());
     } catch (IOException e) {
       throw new BigQueryConnectorException("Error creating BigQueryWriteClient", e);

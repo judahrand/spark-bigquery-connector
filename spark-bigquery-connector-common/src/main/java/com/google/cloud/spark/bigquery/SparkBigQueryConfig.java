@@ -126,6 +126,7 @@ public class SparkBigQueryConfig
   public static final String INTERMEDIATE_FORMAT_OPTION = "intermediateFormat";
   public static final String WRITE_METHOD_PARAM = "writeMethod";
   public static final String WRITE_AT_LEAST_ONCE_OPTION = "writeAtLeastOnce";
+  public static final String ENABLE_OPEN_TELEMETRY_TRACING_OPTION = "enableOpenTelemetryTracing";
   @VisibleForTesting static final DataFormat DEFAULT_READ_DATA_FORMAT = DataFormat.ARROW;
 
   @VisibleForTesting
@@ -252,6 +253,7 @@ public class SparkBigQueryConfig
   private ResponseCompressionCodec responseCompressionCodec = DEFAULT_RESPONSE_COMPRESSION_CODEC;
   private WriteMethod writeMethod = DEFAULT_WRITE_METHOD;
   boolean writeAtLeastOnce = false;
+  private boolean enableOpenTelemetryTracing;
   private int cacheExpirationTimeInMinutes = DEFAULT_CACHE_EXPIRATION_IN_MINUTES;
   // used to create BigQuery ReadSessions
   private com.google.common.base.Optional<String> traceId;
@@ -497,6 +499,8 @@ public class SparkBigQueryConfig
             .or(writeMethodDefault);
     config.writeAtLeastOnce =
         getAnyBooleanOption(globalOptions, options, WRITE_AT_LEAST_ONCE_OPTION, false);
+    config.enableOpenTelemetryTracing =
+        getAnyBooleanOption(globalOptions, options, ENABLE_OPEN_TELEMETRY_TRACING_OPTION, false);
 
     boolean validateSparkAvro =
         config.writeMethod == WriteMethod.INDIRECT
@@ -1197,6 +1201,11 @@ public class SparkBigQueryConfig
 
   public boolean isWriteAtLeastOnce() {
     return writeAtLeastOnce;
+  }
+
+  @Override
+  public boolean isOpenTelemetryTracingEnabled() {
+    return enableOpenTelemetryTracing;
   }
 
   public Optional<String> getTraceId() {

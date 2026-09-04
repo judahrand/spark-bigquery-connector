@@ -21,6 +21,7 @@ import static com.google.cloud.bigquery.connector.common.BigQueryUtil.getQueryFo
 import static com.google.cloud.bigquery.connector.common.BigQueryUtil.isBigQueryNativeTable;
 
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.http.HttpRequestInitializer;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.bigquery.Bigquery;
 import com.google.auth.http.HttpCredentialsAdapter;
@@ -50,12 +51,17 @@ import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TableResult;
 import com.google.cloud.bigquery.TimePartitioning;
+import com.google.cloud.bigquery.telemetry.HttpTracingRequestInitializer;
 import com.google.cloud.http.BaseHttpServiceException;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.security.GeneralSecurityException;
@@ -123,14 +129,21 @@ public class BigQueryClient {
       // once, and can be reused for multiple requests
       HttpCredentialsAdapter httpCredentialsAdapter =
           new HttpCredentialsAdapter(bigQuery.getOptions().getCredentials());
+      HttpRequestInitializer requestInitializer =
+          httpRequest -> {
+            httpCredentialsAdapter.initialize(httpRequest);
+            httpRequest.setThrowExceptionOnExecuteError(false);
+          };
+      if (bigQuery.getOptions().isOpenTelemetryTracingEnabled()) {
+        requestInitializer =
+            new HttpTracingRequestInitializer(
+                requestInitializer, bigQuery.getOptions().getOpenTelemetryTracer());
+      }
       Bigquery.Builder client =
           new Bigquery.Builder(
                   GoogleNetHttpTransport.newTrustedTransport(),
                   GsonFactory.getDefaultInstance(),
-                  httpRequest -> {
-                    httpCredentialsAdapter.initialize(httpRequest);
-                    httpRequest.setThrowExceptionOnExecuteError(false);
-                  })
+                  requestInitializer)
               .setApplicationName(bigQuery.getOptions().getUserAgent());
       return client.build();
     } catch (GeneralSecurityException gse) {
@@ -1034,6 +1047,15 @@ public class BigQueryClient {
    * regular one
    */
   public Optional<com.google.api.services.bigquery.model.Table> getRestTable(TableId tableId) {
+    Span span = null;
+    Scope scope = null;
+    if (bigQuery.getOptions().isOpenTelemetryTracingEnabled()) {
+      Tracer tracer = bigQuery.getOptions().getOpenTelemetryTracer();
+      if (tracer != null) {
+        span = tracer.spanBuilder("com.google.cloud.bigquery.BigQuery.getTable").startSpan();
+        scope = span.makeCurrent();
+      }
+    }
     try {
       // tableId.getProject() may be null, so we replacing it with the default project id
       String project =
@@ -1045,7 +1067,18 @@ public class BigQueryClient {
               .get(project, tableId.getDataset(), tableId.getTable())
               .execute());
     } catch (IOException e) {
+      if (span != null) {
+        span.recordException(e);
+        span.setStatus(StatusCode.ERROR);
+      }
       throw new UncheckedIOException(e);
+    } finally {
+      if (scope != null) {
+        scope.close();
+      }
+      if (span != null) {
+        span.end();
+      }
     }
   }
 

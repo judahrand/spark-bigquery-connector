@@ -26,18 +26,25 @@ import static org.mockito.Mockito.withSettings;
 import com.google.api.gax.retrying.RetrySettings;
 import com.google.api.gax.rpc.FixedHeaderProvider;
 import com.google.api.gax.rpc.HeaderProvider;
+import com.google.api.gax.rpc.LibraryMetadata;
+import com.google.api.gax.tracing.ApiTracer;
+import com.google.api.gax.tracing.ApiTracerContext;
+import com.google.api.gax.tracing.ApiTracerFactory;
+import com.google.api.gax.tracing.SpanName;
 import com.google.auth.Credentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ImpersonatedCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.bigquery.QueryJobConfiguration.Priority;
 import com.google.cloud.bigquery.storage.v1.BigQueryReadClient;
+import com.google.cloud.bigquery.storage.v1.BigQueryReadSettings;
 import com.google.cloud.bigquery.storage.v1.BigQueryWriteClient;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.URI;
@@ -48,6 +55,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.Test;
 import org.mockito.Answers;
 
@@ -182,6 +190,118 @@ public class BigQueryClientFactoryTest {
 
     assertNotSame(readClient, readClient3);
     assertNotSame(readClient2, readClient3);
+  }
+
+  @Test
+  public void tracedAndUntracedConfigurationsDoNotShareReadClients() {
+    BigQueryReadClient untracedClient =
+        new BigQueryClientFactory(
+                bigQueryCredentialsSupplier,
+                headerProvider,
+                new TestBigQueryConfig(Optional.of("tracing-cache:8080"), false))
+            .getBigQueryReadClient();
+    BigQueryReadClient tracedClient =
+        new BigQueryClientFactory(
+                bigQueryCredentialsSupplier,
+                headerProvider,
+                new TestBigQueryConfig(Optional.of("tracing-cache:8080"), true))
+            .getBigQueryReadClient();
+
+    assertNotSame(untracedClient, tracedClient);
+  }
+
+  @Test
+  public void tracedAndUntracedConfigurationsDoNotShareWriteClients() {
+    BigQueryWriteClient untracedClient =
+        new BigQueryClientFactory(
+                bigQueryCredentialsSupplier,
+                headerProvider,
+                new TestBigQueryConfig(Optional.of("tracing-write-cache:8080"), false))
+            .getBigQueryWriteClient();
+    BigQueryWriteClient tracedClient =
+        new BigQueryClientFactory(
+                bigQueryCredentialsSupplier,
+                headerProvider,
+                new TestBigQueryConfig(Optional.of("tracing-write-cache:8080"), true))
+            .getBigQueryWriteClient();
+
+    assertNotSame(untracedClient, tracedClient);
+  }
+
+  @Test
+  public void tracedStorageClientsEmitSpans() throws IOException {
+    try (OpenTelemetryTestUtils telemetry = OpenTelemetryTestUtils.install()) {
+      BigQueryClientFactory clientFactory =
+          new BigQueryClientFactory(
+              bigQueryCredentialsSupplier,
+              headerProvider,
+              new TestBigQueryConfig(Optional.of("traced-storage:8080"), true));
+
+      OpenTelemetryTestUtils.executeStorageOperations(clientFactory);
+
+      assertThat(
+              telemetry.getFinishedSpans().stream()
+                  .map(io.opentelemetry.sdk.trace.data.SpanData::getName)
+                  .collect(Collectors.toList()))
+          .containsAtLeast(
+              "com.google.cloud.bigquery.storage.v1.read.createReadSession",
+              "com.google.cloud.bigquery.storage.v1.read.stub.createReadSessionCallable",
+              "google.cloud.bigquery.storage.v1.BigQueryWrite/CreateWriteStream");
+    }
+  }
+
+  @Test
+  public void tracedReadClientConfiguresGaxFactoryFromGlobalOpenTelemetry() {
+    try (OpenTelemetryTestUtils telemetry = OpenTelemetryTestUtils.install()) {
+      BigQueryReadSettings settings =
+          new BigQueryClientFactory(
+                  bigQueryCredentialsSupplier,
+                  headerProvider,
+                  new TestBigQueryConfig(Optional.of("gax-read-tracing:8080"), true))
+              .getBigQueryReadClient()
+              .getSettings();
+      ApiTracerFactory tracerFactory = settings.getStubSettings().getTracerFactory();
+      ApiTracerContext tracerContext =
+          ApiTracerContext.newBuilder()
+              .setLibraryMetadata(
+                  LibraryMetadata.newBuilder()
+                      .setRepository("googleapis/google-cloud-java")
+                      .setArtifactName("google-cloud-bigquerystorage")
+                      .setVersion("test")
+                      .build())
+              .build();
+      ApiTracer tracer =
+          tracerFactory
+              .withContext(tracerContext)
+              .newTracer(
+                  null,
+                  SpanName.of("google.cloud.bigquery.storage.v1.BigQueryRead", "CreateReadSession"),
+                  ApiTracerFactory.OperationType.Unary);
+
+      tracer.attemptStarted(null, 0);
+      tracer.attemptSucceeded();
+
+      assertThat(
+              telemetry.getFinishedSpans().stream()
+                  .map(io.opentelemetry.sdk.trace.data.SpanData::getName)
+                  .collect(Collectors.toList()))
+          .contains("google.cloud.bigquery.storage.v1.BigQueryRead/CreateReadSession/attempt");
+    }
+  }
+
+  @Test
+  public void disabledStorageClientsDoNotEmitConnectorEnabledSpans() throws IOException {
+    try (OpenTelemetryTestUtils telemetry = OpenTelemetryTestUtils.install()) {
+      BigQueryClientFactory clientFactory =
+          new BigQueryClientFactory(
+              bigQueryCredentialsSupplier,
+              headerProvider,
+              new TestBigQueryConfig(Optional.of("untraced-storage:8080"), false));
+
+      OpenTelemetryTestUtils.executeStorageOperations(clientFactory);
+
+      assertThat(telemetry.getFinishedSpans()).isEmpty();
+    }
   }
 
   @Test
@@ -534,9 +654,16 @@ public class BigQueryClientFactoryTest {
   private class TestBigQueryConfig implements BigQueryConfig {
 
     private final Optional<String> bigQueryStorageGrpcEndpoint;
+    private final boolean enableOpenTelemetryTracing;
 
     TestBigQueryConfig(Optional<String> bigQueryStorageGrpcEndpoint) {
+      this(bigQueryStorageGrpcEndpoint, false);
+    }
+
+    TestBigQueryConfig(
+        Optional<String> bigQueryStorageGrpcEndpoint, boolean enableOpenTelemetryTracing) {
       this.bigQueryStorageGrpcEndpoint = bigQueryStorageGrpcEndpoint;
+      this.enableOpenTelemetryTracing = enableOpenTelemetryTracing;
     }
 
     @Override
@@ -692,6 +819,11 @@ public class BigQueryClientFactoryTest {
     @Override
     public Optional<ImmutableList<String>> getCredentialsScopes() {
       return Optional.empty();
+    }
+
+    @Override
+    public boolean isOpenTelemetryTracingEnabled() {
+      return enableOpenTelemetryTracing;
     }
 
     @Override

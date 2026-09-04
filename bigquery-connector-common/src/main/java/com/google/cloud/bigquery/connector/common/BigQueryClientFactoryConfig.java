@@ -58,6 +58,7 @@ public class BigQueryClientFactoryConfig implements BigQueryConfig {
   private final Optional<Integer> flowControlWindowBytes;
   private final QueryJobConfiguration.Priority queryJobPriority;
   private final long bigQueryJobTimeoutInMinutes;
+  private final boolean enableOpenTelemetryTracing;
 
   BigQueryClientFactoryConfig(BigQueryConfig bigQueryConfig, long bigQueryJobTimeoutInMinutes) {
     this.accessTokenProviderFQCN = bigQueryConfig.getAccessTokenProviderFQCN();
@@ -95,6 +96,7 @@ public class BigQueryClientFactoryConfig implements BigQueryConfig {
     this.flowControlWindowBytes = bigQueryConfig.getFlowControlWindowBytes();
     this.queryJobPriority = bigQueryConfig.getQueryJobPriority();
     this.bigQueryJobTimeoutInMinutes = bigQueryJobTimeoutInMinutes;
+    this.enableOpenTelemetryTracing = bigQueryConfig.isOpenTelemetryTracingEnabled();
   }
 
   @Override
@@ -252,6 +254,11 @@ public class BigQueryClientFactoryConfig implements BigQueryConfig {
   }
 
   @Override
+  public boolean isOpenTelemetryTracingEnabled() {
+    return enableOpenTelemetryTracing;
+  }
+
+  @Override
   public boolean equals(Object o) {
     if (this == o) {
       return true;
@@ -263,6 +270,7 @@ public class BigQueryClientFactoryConfig implements BigQueryConfig {
     return viewsEnabled == that.viewsEnabled
         && bigQueryClientConnectTimeout == that.bigQueryClientConnectTimeout
         && bigQueryClientReadTimeout == that.bigQueryClientReadTimeout
+        && enableOpenTelemetryTracing == that.enableOpenTelemetryTracing
         && Objects.equal(credentialsKey, that.credentialsKey)
         && Objects.equal(credentialsFile, that.credentialsFile)
         && Objects.equal(accessToken, that.accessToken)
@@ -300,6 +308,7 @@ public class BigQueryClientFactoryConfig implements BigQueryConfig {
         bigQueryHttpEndpoint,
         cacheExpirationTimeInMinutes,
         channelPoolSize,
-        flowControlWindowBytes);
+        flowControlWindowBytes,
+        enableOpenTelemetryTracing);
   }
 }

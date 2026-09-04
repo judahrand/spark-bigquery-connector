@@ -595,6 +595,20 @@ word-break:break-word
    <td>Write</td>
   </tr>
   <tr valign="top">
+   <td><code>enableOpenTelemetryTracing</code>
+   </td>
+   <td>Enables the Beta/Pre-GA OpenTelemetry integrations for connector-created
+       BigQuery HTTP, Storage Read, and Storage Write clients. The clients use
+       the JVM's standard <code>GlobalOpenTelemetry</code> instance; without a
+       configured agent or SDK, this is the safe no-op implementation. Complete
+       Spark coverage requires the OpenTelemetry Java agent on both the driver
+       and every executor JVM. Exporter, sampler, resource, and propagation
+       configuration remain the responsibility of the agent or application.
+       <br/>(Optional. Defaults to <code>false</code>)
+   </td>
+   <td>Read/Write</td>
+  </tr>
+  <tr valign="top">
    <td><code>traceApplicationName</code>
    </td>
    <td>Application name used to trace BigQuery Storage read and write sessions.

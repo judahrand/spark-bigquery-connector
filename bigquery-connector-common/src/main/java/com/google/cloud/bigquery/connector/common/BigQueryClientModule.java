@@ -26,12 +26,15 @@ import com.google.inject.Binder;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import com.google.inject.Singleton;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 public class BigQueryClientModule implements com.google.inject.Module {
 
   private static final int DESTINATION_TABLE_CACHE_MAX_SIZE = 1000;
+  private static final String BIGQUERY_OPEN_TELEMETRY_INSTRUMENTATION_SCOPE =
+      "com.google.cloud.bigquery";
 
   /*
    * In order to parameterize the cache expiration time, the instance needs to be loaded lazily.
@@ -112,6 +115,13 @@ public class BigQueryClientModule implements com.google.inject.Module {
             .setUniverseDomain(bigQueryCredentialsSupplier.getUniverseDomain());
 
     config.getCatalogLocation().ifPresent(options::setLocation);
+
+    if (config.isOpenTelemetryTracingEnabled()) {
+      options
+          .setEnableOpenTelemetryTracing(true)
+          .setOpenTelemetryTracer(
+              GlobalOpenTelemetry.get().getTracer(BIGQUERY_OPEN_TELEMETRY_INSTRUMENTATION_SCOPE));
+    }
 
     HttpTransportOptions.Builder httpTransportOptionsBuilder =
         HttpTransportOptions.newBuilder()

@@ -16,19 +16,42 @@
 
 JAR_FILE="$1"
 
-jar tvf "${JAR_FILE}" | \
+for REQUIRED_CLASS in \
+  io/opentelemetry/api/GlobalOpenTelemetry.class \
+  io/opentelemetry/context/Context.class \
+  io/opentelemetry/common/ComponentLoader.class
+do
+  if ! jar tf "${JAR_FILE}" | grep -Fxq "${REQUIRED_CLASS}"; then
+    echo "Missing standard OpenTelemetry class: ${REQUIRED_CLASS}"
+    exit 1
+  fi
+done
+
+if jar tf "${JAR_FILE}" | \
+  grep -q '^com/google/cloud/spark/bigquery/repackaged/io/opentelemetry/'; then
+  echo "Found relocated OpenTelemetry classes"
+  exit 1
+fi
+
+if ! unzip -p "${JAR_FILE}" \
+  com/google/cloud/bigquery/connector/common/BigQueryClientFactory.class | \
+  strings | grep -q 'io/opentelemetry/api/GlobalOpenTelemetry'; then
+  echo "Connector bytecode does not reference standard OpenTelemetry packages"
+  exit 1
+fi
+
+UNSHADED_CLASSES=$(jar tf "${JAR_FILE}" | \
   grep -v META-INF | \
   grep -E "\.class$" | \
   grep -v com/google/cloud/spark/bigquery | \
   grep -v com/google/cloud/bigquery/connector/common | \
-  grep -vE 'org/apache/spark/sql/.*SparkSqlUtils.class'
+  grep -vE 'org/apache/spark/sql/.*SparkSqlUtils.class' | \
+  grep -vE '^io/opentelemetry/(api|context|common)/')
 
-if [ $? -eq 0 ]; then
-  # grep found classes where there shouldn't be any. Print error message and exit
-  echo ""
+if [ -n "${UNSHADED_CLASSES}" ]; then
+  echo "${UNSHADED_CLASSES}"
   echo "Found unshaded classes, please fix above findings"
   exit 1
-else
-  echo "No unshaded classes found"
-  exit 0
 fi
+
+echo "No unexpected unshaded classes found"

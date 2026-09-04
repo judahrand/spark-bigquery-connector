@@ -33,9 +33,6 @@ import com.google.cloud.bigquery.storage.v1.DataFormat;
 import com.google.cloud.bigquery.storage.v1.ReadSession.TableReadOptions.ResponseCompressionCodec;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.ObjectOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Base64;
@@ -61,22 +58,29 @@ public class SparkBigQueryConfigTest {
   ImmutableMap<String, String> defaultGlobalOptions = ImmutableMap.of("spark.executor.cores", "1");
 
   @Test
-  public void testSerializability() throws IOException {
+  public void testSerializability() {
     Configuration hadoopConfiguration = new Configuration();
-    DataSourceOptions options = new DataSourceOptions(defaultOptions);
-    // test to make sure all members can be serialized.
-    new ObjectOutputStream(new ByteArrayOutputStream())
-        .writeObject(
-            SparkBigQueryConfig.from(
-                options.asMap(),
-                ImmutableMap.of(),
-                hadoopConfiguration,
-                ImmutableMap.of(),
-                DEFAULT_PARALLELISM,
-                new SQLConf(),
-                SPARK_VERSION,
-                Optional.empty(), /* tableIsMandatory */
-                true));
+    DataSourceOptions options =
+        new DataSourceOptions(
+            ImmutableMap.<String, String>builder()
+                .putAll(defaultOptions)
+                .put(SparkBigQueryConfig.ENABLE_OPEN_TELEMETRY_TRACING_OPTION, "true")
+                .build());
+    SparkBigQueryConfig config =
+        SparkBigQueryConfig.from(
+            options.asMap(),
+            ImmutableMap.of(),
+            hadoopConfiguration,
+            ImmutableMap.of(),
+            DEFAULT_PARALLELISM,
+            new SQLConf(),
+            SPARK_VERSION,
+            Optional.empty(), /* tableIsMandatory */
+            true);
+
+    SparkBigQueryConfig deserializedConfig = BigQueryUtil.verifySerialization(config);
+
+    assertThat(deserializedConfig.isOpenTelemetryTracingEnabled()).isTrue();
   }
 
   @Test
@@ -616,6 +620,82 @@ public class SparkBigQueryConfigTest {
         .put(key1, value1)
         .put(key2, value2)
         .build();
+  }
+
+  @Test
+  public void openTelemetryTracingDefaultsToDisabled() {
+    SparkBigQueryConfig config =
+        SparkBigQueryConfig.from(
+            asDataSourceOptionsMap(parameters),
+            emptyMap, // allConf
+            new Configuration(),
+            emptyMap, // customDefaults
+            1,
+            new SQLConf(),
+            sparkVersion,
+            /* schema */ Optional.empty(),
+            /* tableIsMandatory */ true);
+
+    assertThat(config.isOpenTelemetryTracingEnabled()).isFalse();
+  }
+
+  @Test
+  public void openTelemetryTracingCanBeEnabledForAnOperation() {
+    SparkBigQueryConfig config =
+        SparkBigQueryConfig.from(
+            asDataSourceOptionsMap(
+                withParameter(SparkBigQueryConfig.ENABLE_OPEN_TELEMETRY_TRACING_OPTION, "true")),
+            emptyMap, // allConf
+            new Configuration(),
+            emptyMap, // customDefaults
+            1,
+            new SQLConf(),
+            sparkVersion,
+            /* schema */ Optional.empty(),
+            /* tableIsMandatory */ true);
+
+    assertThat(config.isOpenTelemetryTracingEnabled()).isTrue();
+  }
+
+  @Test
+  public void openTelemetryTracingCanBeEnabledGlobally() {
+    SparkBigQueryConfig config =
+        SparkBigQueryConfig.from(
+            asDataSourceOptionsMap(parameters),
+            ImmutableMap.of(
+                "spark.datasource.bigquery."
+                    + SparkBigQueryConfig.ENABLE_OPEN_TELEMETRY_TRACING_OPTION,
+                "true"),
+            new Configuration(),
+            emptyMap, // customDefaults
+            1,
+            new SQLConf(),
+            sparkVersion,
+            /* schema */ Optional.empty(),
+            /* tableIsMandatory */ true);
+
+    assertThat(config.isOpenTelemetryTracingEnabled()).isTrue();
+  }
+
+  @Test
+  public void operationOpenTelemetryTracingSettingOverridesGlobalSetting() {
+    SparkBigQueryConfig config =
+        SparkBigQueryConfig.from(
+            asDataSourceOptionsMap(
+                withParameter(SparkBigQueryConfig.ENABLE_OPEN_TELEMETRY_TRACING_OPTION, "false")),
+            ImmutableMap.of(
+                "spark.datasource.bigquery."
+                    + SparkBigQueryConfig.ENABLE_OPEN_TELEMETRY_TRACING_OPTION,
+                "true"),
+            new Configuration(),
+            emptyMap, // customDefaults
+            1,
+            new SQLConf(),
+            sparkVersion,
+            /* schema */ Optional.empty(),
+            /* tableIsMandatory */ true);
+
+    assertThat(config.isOpenTelemetryTracingEnabled()).isFalse();
   }
 
   @Test

@@ -90,6 +90,10 @@ public interface BigQueryConfig {
 
   Optional<ImmutableList<String>> getCredentialsScopes();
 
+  default boolean isOpenTelemetryTracingEnabled() {
+    return false;
+  }
+
   default int getClientCreationHashCode() {
     return Objects.hashCode(
         getAccessTokenProviderFQCN(),
@@ -103,7 +107,8 @@ public interface BigQueryConfig {
         getCreateReadSessionTimeoutInSeconds(),
         getBigQueryProxyConfig(),
         getParentProjectId(),
-        useParentProjectForMetadataOperations());
+        useParentProjectForMetadataOperations(),
+        isOpenTelemetryTracingEnabled());
   }
 
   default boolean areClientCreationConfigsEqual(BigQueryConfig b) {
@@ -123,6 +128,7 @@ public interface BigQueryConfig {
         && Objects.equal(getBigQueryProxyConfig(), b.getBigQueryProxyConfig())
         && Objects.equal(getParentProjectId(), b.getParentProjectId())
         && Objects.equal(
-            useParentProjectForMetadataOperations(), b.useParentProjectForMetadataOperations());
+            useParentProjectForMetadataOperations(), b.useParentProjectForMetadataOperations())
+        && Objects.equal(isOpenTelemetryTracingEnabled(), b.isOpenTelemetryTracingEnabled());
   }
 }

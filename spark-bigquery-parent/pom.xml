@@ -685,10 +685,6 @@
                             <shadedPattern>com.google.cloud.spark.bigquery.repackaged.io.opencensus</shadedPattern>
                         </relocation>
                         <relocation>
-                            <pattern>io.opentelemetry</pattern>
-                            <shadedPattern>com.google.cloud.spark.bigquery.repackaged.io.opentelemetry</shadedPattern>
-                        </relocation>
-                        <relocation>
                             <pattern>io.perfmark</pattern>
                             <shadedPattern>com.google.cloud.spark.bigquery.repackaged.io.perfmark</shadedPattern>
                         </relocation>
